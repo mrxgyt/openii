@@ -10,34 +10,18 @@ RUN npm install
 
 COPY frontend/ ./
 
-# Сборка фронтенда (API проксируется через /api на тот же хост)
+# Сборка фронтенда
 RUN npm run build
 
 ###############################################################################
-# Stage 2: Build & bundle Node.js API server
+# Stage 2: Python Backend (FastAPI + diffusers) + CUDA
 ###############################################################################
-FROM node:20-slim AS api-builder
-
-WORKDIR /app/api
-
-COPY artifacts/api-server/package*.json ./
-RUN npm install
-
-COPY artifacts/api-server/ ./
-COPY scripts/download-model.mjs /scripts/download-model.mjs
-
-RUN node build.mjs
-
-###############################################################################
-# Stage 3: Python Backend (FastAPI + diffusers) + CUDA
-###############################################################################
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS backend
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Установка Python и Node.js
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 \
     python3.10-dev \
@@ -47,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \
-    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
@@ -65,16 +48,17 @@ COPY backend/ ./
 # Фронтенд (статические файлы)
 COPY --from=frontend-builder /app/frontend/dist ./static
 
+# Entrypoint-скрипт (скачивает модель при первом старте)
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Создать папки для моделей
 RUN mkdir -p /app/models/checkpoints /app/models/loras
-
-# Скачать модель по умолчанию во время сборки Docker-образа
-COPY scripts/download-model.mjs /scripts/download-model.mjs
-RUN MODELS_DIR=/app/models node /scripts/download-model.mjs
 
 EXPOSE 8080
 
 ENV PORT=8080
 ENV MODELS_DIR=/app/models
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
