@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import gc
 import io
+import json
 import logging
 import os
 import random
@@ -47,16 +48,45 @@ log = logging.getLogger(__name__)
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", "/app/models"))
 CHECKPOINTS_DIR = MODELS_DIR / "checkpoints"
 LORAS_DIR = MODELS_DIR / "loras"
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(MODELS_DIR / "data")))
+GALLERY_FILE = DATA_DIR / "gallery.json"
 STATIC_DIR = Path(__file__).parent / "static"
 
 VALID_EXTENSIONS = {".safetensors", ".ckpt", ".pt", ".bin"}
 MAX_GALLERY = 100
 
 # ---------------------------------------------------------------------------
+# Gallery persistence
+# ---------------------------------------------------------------------------
+
+def load_gallery() -> list[dict[str, Any]]:
+    """Загружает галерею из файла на диске."""
+    try:
+        if GALLERY_FILE.exists():
+            with open(GALLERY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                log.info("Loaded %d gallery items from %s", len(data), GALLERY_FILE)
+                return data
+    except Exception as e:
+        log.warning("Could not load gallery from disk: %s", e)
+    return []
+
+
+def save_gallery(items: list[dict[str, Any]]) -> None:
+    """Сохраняет галерею на диск."""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(GALLERY_FILE, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False)
+    except Exception as e:
+        log.warning("Could not save gallery to disk: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
 
-gallery: list[dict[str, Any]] = []
+gallery: list[dict[str, Any]] = load_gallery()
 
 # Lazy-loaded pipeline cache  {model_name: pipeline}
 _pipeline_cache: dict[str, Any] = {}
@@ -388,6 +418,9 @@ async def generate_image(request: GenerateRequest) -> dict[str, Any]:
     gallery.insert(0, item)
     if len(gallery) > MAX_GALLERY:
         gallery.pop()
+
+    # Сохранить галерею на диск (сохраняется между перезапусками)
+    save_gallery(gallery)
 
     log.info("Generated image in %.1f ms (seed=%d)", generation_time_ms, seed_used)
 

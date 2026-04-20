@@ -7,8 +7,8 @@ LORAS_DIR="$MODELS_DIR/loras"
 MODEL_PATH="$CHECKPOINTS_DIR/default-model.safetensors"
 MODEL_URL="https://civitai.red/api/download/models/2831949?type=Model&format=SafeTensor&size=pruned&fp=fp16"
 
-# Создать папки для моделей
-mkdir -p "$CHECKPOINTS_DIR" "$LORAS_DIR"
+# Создать папки для моделей и данных
+mkdir -p "$CHECKPOINTS_DIR" "$LORAS_DIR" "$MODELS_DIR/data"
 
 # Скачать модель по умолчанию если её нет
 if [ ! -f "$MODEL_PATH" ]; then
