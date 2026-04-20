@@ -116,7 +116,7 @@ def main():
 
     # 5. Создать новый коммит
     commit_data = api_request(f"/repos/{OWNER}/{REPO}/git/commits", "POST", {
-        "message": "fix: исправлен OOM краш при загрузке модели\n\n- backend/main.py: всегда используем float16 (было float32 на CPU = OOM)\n- Добавлен low_cpu_mem_usage=True для снижения пикового потребления RAM\n- Добавлен enable_sequential_cpu_offload() для CPU-режима\n- Добавлен enable_attention_slicing() для GPU/CPU\n- Улучшено определение SDXL/Illustrious моделей по имени файла",
+        "message": "fix: исправлено определение типа модели (SD1.5 vs SDXL)\n\n- backend/main.py: добавлена функция detect_model_type() — читает заголовок safetensors\n- Исправлен TypeError: argument of type 'NoneType' is not iterable\n- Модель с именем 'default-model' теперь корректно определяется как SDXL/Illustrious\n  по содержимому файла (ключ 'conditioner.' в заголовке safetensors)\n- Ранее код проверял только имя файла, игнорируя реальную архитектуру модели",
         "tree": new_tree_sha,
         "parents": [head_sha],
     })

@@ -245,6 +245,37 @@ SAMPLER_MAP = {
 }
 
 
+def detect_model_type(model_path: Path) -> bool:
+    """Определяет тип модели из заголовка safetensors — возвращает True если это SDXL."""
+    name_lower = model_path.stem.lower()
+    # Сначала проверяем по имени (быстро)
+    if any(kw in name_lower for kw in ("xl", "sdxl", "illustrious", "pony", "noob")):
+        log.info("Detected SDXL model by filename: %s", model_path.name)
+        return True
+
+    # Если имя не говорящее — читаем заголовок safetensors
+    if model_path.suffix.lower() == ".safetensors":
+        try:
+            import struct
+            with open(model_path, "rb") as f:
+                header_size = struct.unpack("<Q", f.read(8))[0]
+                # Ограничиваем чтение — 10 MB достаточно для ключей
+                header_bytes = f.read(min(header_size, 10 * 1024 * 1024))
+            header_str = header_bytes.decode("utf-8", errors="ignore")
+            # SDXL использует "conditioner", SD1.5 — "cond_stage_model"
+            is_sdxl = '"conditioner.' in header_str
+            log.info(
+                "Detected %s model by safetensors header: %s",
+                "SDXL" if is_sdxl else "SD1.5",
+                model_path.name,
+            )
+            return is_sdxl
+        except Exception as e:
+            log.warning("Could not read safetensors header for %s: %s", model_path.name, e)
+
+    return False
+
+
 def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
     """Load or retrieve a cached Stable Diffusion pipeline."""
     global _active_model, _pipeline_cache
@@ -273,9 +304,8 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
         # (float16 на CPU падает при инференсе, float32 = OOM, bfloat16 = золотая середина)
         dtype = torch.float16 if gpu_available else torch.bfloat16
 
-        # Определяем тип модели по имени файла
-        name_lower = model_name.lower()
-        is_sdxl = any(kw in name_lower for kw in ("xl", "sdxl", "illustrious", "pony", "noob"))
+        # Определяем тип модели по содержимому файла (не только по имени)
+        is_sdxl = detect_model_type(model_path)
         PipelineClass = StableDiffusionXLPipeline if is_sdxl else StableDiffusionPipeline
 
         log.info("Pipeline class: %s, dtype: %s, gpu: %s", PipelineClass.__name__, dtype, gpu_available)
