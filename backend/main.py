@@ -221,13 +221,9 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
             pipe.enable_attention_slicing()
         else:
             log.warning("No GPU detected, running on CPU (very slow)")
-            # CPU offload: держит части модели в RAM и загружает только нужные слои
-            try:
-                pipe.enable_sequential_cpu_offload()
-                log.info("Sequential CPU offload enabled")
-            except Exception as e:
-                log.warning("CPU offload not available: %s", e)
-                pipe.enable_attention_slicing(1)
+            # Чистый CPU режим — никаких CUDA вызовов
+            pipe = pipe.to("cpu")
+            pipe.enable_attention_slicing(1)
 
         _pipeline_cache[model_name] = pipe
         _active_model = model_name
