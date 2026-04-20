@@ -1,68 +1,78 @@
-# AI Image Generator
+# AI Image Generator (NeuralGEN)
 
 ## Overview
 
-A full-stack AI Image Generation web application — a dark-mode control panel for Stable Diffusion / SDXL / Flux image generation.
+Полностековое веб-приложение для генерации AI изображений — тёмная панель управления для Stable Diffusion / SDXL / Flux.
 
 ## Architecture
 
-### Frontend (`artifacts/ai-image-gen/`)
-- **React + Vite + TypeScript**
-- **Tailwind CSS v4** with deep dark purple/violet theme
-- **shadcn/ui** component library
-- Three modules: Workspace (generation), Model Library (upload), Settings Panel (parameters)
+### Frontend (`frontend/`)
+- **React 19 + Vite + TypeScript**
+- **Tailwind CSS v4** с тёмной фиолетовой темой
+- **shadcn/ui** компонентная библиотека
+- Запускается на порту **5000**
+- Проксирует `/api` запросы на бэкенд (порт 8000)
 
 ### Backend (`artifacts/api-server/`)
 - **Express 5 + TypeScript + Node.js**
-- Serves the REST API: models scan, file upload, image generation, gallery
-- In dev/CPU mode: generates gradient SVG placeholder images
-- In production with diffusers (Python): generates real AI images
+- REST API: список моделей, загрузка, генерация, галерея
+- В dev/CPU режиме генерирует SVG-заглушки вместо реальных изображений
+- Запускается на порту **8000**
 
 ### Python Backend (`backend/main.py`)
 - **FastAPI + Hugging Face diffusers**
-- Designed for Google Cloud Run with GPU (NVIDIA CUDA)
-- Loads Stable Diffusion / SDXL / Flux pipelines from local model files
-- Supports LoRA adapters with configurable weights
-- Serves static React build + REST API from single container
+- Для деплоя на Northflank/Google Cloud Run с GPU (NVIDIA CUDA)
+- Загружает Stable Diffusion / SDXL / Flux из локальных файлов
+- Обслуживает статику React + REST API из одного контейнера
 
-### Dockerfile (root)
-- Multi-stage: Node.js build stage → NVIDIA CUDA + Python 3.10 runtime
-- Stage 1: Builds React frontend with `npm run build`
-- Stage 2: Python 3.10 + diffusers, copies frontend dist to `backend/static/`
+### Dockerfile (Northflank deployment)
+- Multi-stage: Node.js сборка фронтенда → Python/CUDA бэкенд
+- Автоматически скачивает модель по умолчанию при сборке Docker-образа
+- Модель: realismIllustriousBy v5.5 FP16 (CivitAI #2831949)
 
 ## Stack
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
+- **Package manager**: npm
+- **Node.js version**: 20
 - **API framework**: Express 5
 - **Validation**: Zod + Orval codegen from OpenAPI spec
 - **Build**: esbuild (API server), Vite (frontend)
 
-## Model Directory Structure (Production / GCS FUSE Mount)
+## Model Directory Structure
 
 ```
-/app/models/
-├── checkpoints/    # Base model files (.safetensors, .ckpt, .pt)
+/tmp/ai-image-gen-models/   (dev)
+/app/models/                (production)
+├── checkpoints/    # Base model files (.safetensors, .ckpt)
 └── loras/          # LoRA adapter files (.safetensors, .pt)
 ```
 
-In development, models are stored in `/tmp/ai-image-gen-models/`.
+## Default Model
+
+- **URL**: https://civitai.red/api/download/models/2831949?type=Model&format=SafeTensor&size=pruned&fp=fp16
+- **Имя файла**: `default-model.safetensors`
+- Скачивается автоматически при первом старте бэкенда (в фоне)
+- В Docker сборке — скачивается во время `docker build`
 
 ## API Endpoints
 
-- `GET /api/healthz` — Health + GPU status
-- `GET /api/models` — List available checkpoints and LoRAs
-- `POST /api/upload` — Chunked upload of model files
-- `POST /api/generate` — Generate image (prompt, model, params, LoRAs)
-- `GET /api/gallery` — Recent generation history
-- `GET /api/samplers` — Available samplers list
+- `GET /api/healthz` — Health + GPU статус
+- `GET /api/models` — Список чекпоинтов и LoRA
+- `POST /api/upload` — Загрузка файлов моделей
+- `POST /api/generate` — Генерация изображения
+- `GET /api/gallery` — История генераций
+- `GET /api/samplers` — Список сэмплеров
 
-## Key Commands
+## Workflows (Replit)
 
-- `pnpm --filter @workspace/api-spec run codegen` — Regenerate API hooks from OpenAPI spec
-- `pnpm --filter @workspace/api-server run dev` — Run API server locally
-- `pnpm --filter @workspace/ai-image-gen run dev` — Run frontend locally
+- **Start application**: `cd frontend && npm run dev` (порт 5000, webview)
+- **Backend API**: `DOWNLOAD_BG=1 node scripts/download-model.mjs & sleep 1 && cd artifacts/api-server && PORT=8000 NODE_ENV=development node --enable-source-maps dist/index.mjs` (порт 8000, console)
+
+## Scripts
+
+- `scripts/download-model.mjs` — Скачивает модель по умолчанию
+- `scripts/github-push.py` — Пушит файлы в GitHub через REST API (без git команд)
 
 ## CPU Mode
 
-When no GPU is detected, the app generates gradient SVG placeholders instead of real AI images. Upload a real `.safetensors` or `.ckpt` model to enable actual diffusers inference. On CPU, generation is very slow (~minutes per image).
+Без GPU генерируются SVG-заглушки с градиентом вместо реальных изображений. Для реальной генерации нужен GPU с CUDA (через Northflank/Cloud Run).
