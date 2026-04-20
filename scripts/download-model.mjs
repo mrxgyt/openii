@@ -10,7 +10,7 @@ import https from "https";
 import http from "http";
 
 const MODEL_URL =
-  "https://civitai.red/api/download/models/320676?type=Model&format=SafeTensor";
+  "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors";
 const MODELS_DIR = process.env.MODELS_DIR ?? "/tmp/ai-image-gen-models";
 const CHECKPOINTS_DIR = join(MODELS_DIR, "checkpoints");
 const MODEL_FILENAME = "default-model.safetensors";

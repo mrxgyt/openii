@@ -5,7 +5,7 @@ MODELS_DIR="${MODELS_DIR:-/app/models}"
 CHECKPOINTS_DIR="$MODELS_DIR/checkpoints"
 LORAS_DIR="$MODELS_DIR/loras"
 MODEL_PATH="$CHECKPOINTS_DIR/default-model.safetensors"
-MODEL_URL="https://civitai.red/api/download/models/320676?type=Model&format=SafeTensor"
+MODEL_URL="https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors"
 
 # Создать папки для моделей и данных
 mkdir -p "$CHECKPOINTS_DIR" "$LORAS_DIR" "$MODELS_DIR/data"
