@@ -1,0 +1,359 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: AI Image Generation API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: models
+    description: Model management
+  - name: generate
+    description: Image generation
+  - name: upload
+    description: File upload
+  - name: gallery
+    description: Gallery operations
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /models:
+    get:
+      operationId: listModels
+      tags: [models]
+      summary: List available models
+      description: Scans model directories and returns available checkpoints and LoRAs
+      responses:
+        "200":
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+
+  /upload:
+    post:
+      operationId: uploadModel
+      tags: [upload]
+      summary: Upload a model file
+      description: Upload a checkpoint or LoRA file to the models directory
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadModelRequest"
+      responses:
+        "200":
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /generate:
+    post:
+      operationId: generateImage
+      tags: [generate]
+      summary: Generate an image
+      description: Generate an image using diffusers with the specified model and parameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "200":
+          description: Image generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Generation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /gallery:
+    get:
+      operationId: getGallery
+      tags: [gallery]
+      summary: Get generation history
+      description: Returns the recent image generation history stored on the server
+      responses:
+        "200":
+          description: Gallery items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryList"
+
+  /samplers:
+    get:
+      operationId: listSamplers
+      tags: [models]
+      summary: List available samplers
+      description: Returns available sampling methods for generation
+      responses:
+        "200":
+          description: List of samplers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamplerList"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        gpu_available:
+          type: boolean
+        cuda_version:
+          type: string
+          nullable: true
+      required:
+        - status
+        - gpu_available
+
+    ModelInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        filename:
+          type: string
+        type:
+          type: string
+          enum: [checkpoint, lora]
+        size_mb:
+          type: number
+          nullable: true
+      required:
+        - name
+        - filename
+        - type
+
+    ModelList:
+      type: object
+      properties:
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelInfo"
+        loras:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelInfo"
+      required:
+        - checkpoints
+        - loras
+
+    UploadModelRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        model_type:
+          type: string
+          enum: [checkpoint, lora]
+      required:
+        - file
+        - model_type
+
+    UploadResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        filename:
+          type: string
+        model_type:
+          type: string
+        message:
+          type: string
+      required:
+        - success
+        - filename
+        - model_type
+        - message
+
+    LoraConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        weight:
+          type: number
+      required:
+        - name
+        - weight
+
+    GenerateRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+        negative_prompt:
+          type: string
+          nullable: true
+        model_name:
+          type: string
+        width:
+          type: integer
+          default: 512
+        height:
+          type: integer
+          default: 512
+        steps:
+          type: integer
+          default: 20
+        cfg_scale:
+          type: number
+          default: 7.5
+        seed:
+          type: integer
+          nullable: true
+        sampler:
+          type: string
+          default: "DPM++ 2M Karras"
+        loras:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoraConfig"
+          nullable: true
+      required:
+        - prompt
+        - model_name
+
+    GenerateResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        image_base64:
+          type: string
+        seed_used:
+          type: integer
+        generation_time_ms:
+          type: number
+        model_name:
+          type: string
+        prompt:
+          type: string
+        id:
+          type: string
+      required:
+        - success
+        - image_base64
+        - seed_used
+        - generation_time_ms
+        - model_name
+        - prompt
+        - id
+
+    GalleryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        image_base64:
+          type: string
+        prompt:
+          type: string
+        model_name:
+          type: string
+        seed_used:
+          type: integer
+        created_at:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+      required:
+        - id
+        - image_base64
+        - prompt
+        - model_name
+        - seed_used
+        - created_at
+
+    GalleryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GalleryItem"
+        total:
+          type: integer
+      required:
+        - items
+        - total
+
+    SamplerInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+      required:
+        - name
+        - label
+
+    SamplerList:
+      type: object
+      properties:
+        samplers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SamplerInfo"
+      required:
+        - samplers
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+          nullable: true
+      required:
+        - error
