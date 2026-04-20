@@ -19,10 +19,12 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -80,6 +82,78 @@ def save_gallery(items: list[dict[str, Any]]) -> None:
             json.dump(items, f, ensure_ascii=False)
     except Exception as e:
         log.warning("Could not save gallery to disk: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Async job system
+# ---------------------------------------------------------------------------
+
+_executor = ThreadPoolExecutor(max_workers=1)  # одна генерация за раз
+
+class GenerationJob:
+    def __init__(self, job_id: str, request_data: dict[str, Any]) -> None:
+        self.id = job_id
+        self.request_data = request_data
+        self.status: Literal["running", "completed", "failed"] = "running"
+        self.result: dict[str, Any] | None = None
+        self.error: str | None = None
+        self.created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.completed_at: str | None = None
+        self._start_ts: float = time.time()  # для расчёта времени
+
+# jobs хранятся в памяти (достаточно — при перезагрузке страницы polling продолжается)
+_jobs: dict[str, GenerationJob] = {}
+
+def _run_generation_job(job_id: str, request: "GenerateRequest") -> None:
+    """Запускается в фоновом потоке."""
+    job = _jobs.get(job_id)
+    if not job:
+        return
+    try:
+        png_bytes, seed_used = run_inference(request)
+        generation_time_ms = round((time.time() - job._start_ts) * 1000, 1)
+        image_b64 = f"data:image/png;base64,{base64.b64encode(png_bytes).decode()}"
+
+        item_id = str(uuid.uuid4())
+        item: dict[str, Any] = {
+            "id": item_id,
+            "image_base64": image_b64,
+            "prompt": request.prompt,
+            "model_name": request.model_name,
+            "seed_used": seed_used,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "settings": {
+                "negative_prompt": request.negative_prompt,
+                "width": request.width,
+                "height": request.height,
+                "steps": request.steps,
+                "cfg_scale": request.cfg_scale,
+                "sampler": request.sampler,
+                "loras": [lora.model_dump() for lora in (request.loras or [])],
+            },
+        }
+        gallery.insert(0, item)
+        if len(gallery) > MAX_GALLERY:
+            gallery.pop()
+        save_gallery(gallery)
+
+        job.status = "completed"
+        job.result = {
+            "success": True,
+            "image_base64": image_b64,
+            "seed_used": seed_used,
+            "generation_time_ms": generation_time_ms,
+            "model_name": request.model_name,
+            "prompt": request.prompt,
+            "id": item_id,
+        }
+        log.info("Job %s completed in %.1f ms", job_id, generation_time_ms)
+    except Exception as e:
+        log.exception("Job %s failed", job_id)
+        job.status = "failed"
+        job.error = str(e)
+    finally:
+        job.completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 # ---------------------------------------------------------------------------
@@ -380,55 +454,42 @@ async def upload_model(
 
 @app.post("/api/generate")
 async def generate_image(request: GenerateRequest) -> dict[str, Any]:
-    start = time.time()
+    """Запускает генерацию в фоне и сразу возвращает job_id для polling."""
+    # Проверить что нет активной генерации
+    running = [j for j in _jobs.values() if j.status == "running"]
+    if running:
+        # Вернуть уже активный job
+        return {"job_id": running[0].id, "status": "running", "queued": True}
 
-    try:
-        png_bytes, seed_used = run_inference(request)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        log.exception("Generation failed")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+    job_id = str(uuid.uuid4())
+    job = GenerationJob(job_id=job_id, request_data=request.model_dump())
+    _jobs[job_id] = job
 
-    generation_time_ms = round((time.time() - start) * 1000, 1)
-    image_b64 = f"data:image/png;base64,{base64.b64encode(png_bytes).decode()}"
+    log.info("Starting async generation job %s", job_id)
+    _executor.submit(_run_generation_job, job_id, request)
 
-    item_id = str(uuid.uuid4())
-    item: dict[str, Any] = {
-        "id": item_id,
-        "image_base64": image_b64,
-        "prompt": request.prompt,
-        "model_name": request.model_name,
-        "seed_used": seed_used,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "settings": {
-            "negative_prompt": request.negative_prompt,
-            "width": request.width,
-            "height": request.height,
-            "steps": request.steps,
-            "cfg_scale": request.cfg_scale,
-            "sampler": request.sampler,
-            "loras": [lora.model_dump() for lora in (request.loras or [])],
-        },
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str) -> dict[str, Any]:
+    """Проверить статус задачи генерации."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    response: dict[str, Any] = {
+        "job_id": job.id,
+        "status": job.status,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
     }
-    gallery.insert(0, item)
-    if len(gallery) > MAX_GALLERY:
-        gallery.pop()
+    if job.status == "completed" and job.result:
+        response.update(job.result)
+    elif job.status == "failed":
+        response["error"] = job.error
 
-    # Сохранить галерею на диск (сохраняется между перезапусками)
-    save_gallery(gallery)
-
-    log.info("Generated image in %.1f ms (seed=%d)", generation_time_ms, seed_used)
-
-    return {
-        "success": True,
-        "image_base64": image_b64,
-        "seed_used": seed_used,
-        "generation_time_ms": generation_time_ms,
-        "model_name": request.model_name,
-        "prompt": request.prompt,
-        "id": item_id,
-    }
+    return response
 
 
 @app.get("/api/gallery")

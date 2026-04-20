@@ -32,12 +32,12 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const [model_name, setModelName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negative_prompt, setNegativePrompt] = useState("");
-  const [width, setWidth] = useState(1024);
-  const [height, setHeight] = useState(1024);
-  const [steps, setSteps] = useState(30);
+  const [width, setWidth] = useState(512);
+  const [height, setHeight] = useState(512);
+  const [steps, setSteps] = useState(20);
   const [cfg_scale, setCfgScale] = useState(7.0);
   const [seed, setSeed] = useState<number | null>(null);
-  const [sampler, setSampler] = useState("euler_a");
+  const [sampler, setSampler] = useState("DPM++ 2M Karras");
   const [loras, setLoras] = useState<LoraConfig[]>([]);
   const [activeImage, setActiveImage] = useState<string | null>(null);
 

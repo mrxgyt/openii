@@ -30,8 +30,12 @@ FILES_TO_PUSH = [
     "artifacts/api-server/package.json",
     "artifacts/api-server/tsconfig.json",
     "artifacts/api-server/build.mjs",
+    "artifacts/api-server/src/routes/generate.ts",
+    "artifacts/api-server/src/routes/index.ts",
     "frontend/vite.config.ts",
     "frontend/package.json",
+    "frontend/src/pages/Workspace.tsx",
+    "frontend/src/contexts/GenerationContext.tsx",
     "replit.md",
 ]
 

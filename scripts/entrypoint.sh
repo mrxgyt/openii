@@ -5,7 +5,7 @@ MODELS_DIR="${MODELS_DIR:-/app/models}"
 CHECKPOINTS_DIR="$MODELS_DIR/checkpoints"
 LORAS_DIR="$MODELS_DIR/loras"
 MODEL_PATH="$CHECKPOINTS_DIR/default-model.safetensors"
-MODEL_URL="https://civitai.red/api/download/models/2831949?type=Model&format=SafeTensor&size=pruned&fp=fp16"
+MODEL_URL="https://civitai.red/api/download/models/320676?type=Model&format=SafeTensor"
 
 # Создать папки для моделей и данных
 mkdir -p "$CHECKPOINTS_DIR" "$LORAS_DIR" "$MODELS_DIR/data"

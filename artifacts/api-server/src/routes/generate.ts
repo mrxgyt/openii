@@ -12,8 +12,20 @@ interface GalleryItem {
   settings: Record<string, unknown>;
 }
 
+type JobStatus = "running" | "completed" | "failed";
+
+interface GenerationJob {
+  id: string;
+  status: JobStatus;
+  result?: Record<string, unknown>;
+  error?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
 const MAX_GALLERY = 50;
 export const galleryItems: GalleryItem[] = [];
+const jobs = new Map<string, GenerationJob>();
 
 function randomInt(max: number): number {
   return Math.floor(Math.random() * max);
@@ -51,7 +63,6 @@ function generatePlaceholderImage(
     fill="rgba(255,255,255,0.6)"
     text-anchor="middle"
     dominant-baseline="middle"
-    style="max-width: ${width - 40}px"
   >[ Diffusers output placeholder ]</text>
   <text
     x="${width / 2}" y="${height / 2 + 20}"
@@ -73,9 +84,77 @@ function generatePlaceholderImage(
   return Buffer.from(svgContent).toString("base64");
 }
 
+async function runPlaceholderGeneration(
+  jobId: string,
+  params: {
+    prompt: string;
+    negative_prompt?: string;
+    model_name: string;
+    width: number;
+    height: number;
+    steps: number;
+    cfg_scale: number;
+    seed_used: number;
+    sampler: string;
+    loras: Array<{ name: string; weight: number }>;
+  },
+): Promise<void> {
+  const start = Date.now();
+  const simulatedMs = Math.min(params.steps * 50 + 500, 5000);
+  await new Promise((r) => setTimeout(r, simulatedMs));
+
+  const imageBase64 = generatePlaceholderImage(
+    params.prompt,
+    params.width,
+    params.height,
+    params.seed_used,
+  );
+  const generation_time_ms = Date.now() - start;
+
+  const id = randomUUID();
+  const item: GalleryItem = {
+    id,
+    image_base64: `data:image/svg+xml;base64,${imageBase64}`,
+    prompt: params.prompt,
+    model_name: params.model_name,
+    seed_used: params.seed_used,
+    created_at: new Date().toISOString(),
+    settings: {
+      negative_prompt: params.negative_prompt,
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      cfg_scale: params.cfg_scale,
+      sampler: params.sampler,
+      loras: params.loras,
+    },
+  };
+
+  galleryItems.unshift(item);
+  if (galleryItems.length > MAX_GALLERY) {
+    galleryItems.splice(MAX_GALLERY);
+  }
+
+  const job = jobs.get(jobId);
+  if (job) {
+    job.status = "completed";
+    job.completed_at = new Date().toISOString();
+    job.result = {
+      success: true,
+      image_base64: item.image_base64,
+      seed_used: params.seed_used,
+      generation_time_ms,
+      model_name: params.model_name,
+      prompt: params.prompt,
+      id,
+    };
+    logger.info({ jobId, generation_time_ms }, "Placeholder generation completed");
+  }
+}
+
 const router: IRouter = Router();
 
-router.post("/generate", async (req, res): Promise<void> => {
+router.post("/generate", (req, res): void => {
   const {
     prompt,
     negative_prompt,
@@ -109,65 +188,82 @@ router.post("/generate", async (req, res): Promise<void> => {
     return;
   }
 
-  const seed_used = seed != null ? seed : randomInt(2147483647);
-  const start = Date.now();
-
-  req.log.info(
-    { model_name, prompt: prompt.slice(0, 80), width, height, steps, sampler, seed: seed_used },
-    "Generating image",
-  );
-
-  const simulatedMs = Math.min(steps * 50 + 200, 2000);
-  await new Promise((r) => setTimeout(r, simulatedMs));
-
-  const imageBase64 = generatePlaceholderImage(prompt, width, height, seed_used);
-  const generation_time_ms = Date.now() - start;
-
-  const id = randomUUID();
-  const item: GalleryItem = {
-    id,
-    image_base64: `data:image/svg+xml;base64,${imageBase64}`,
-    prompt,
-    model_name,
-    seed_used,
-    created_at: new Date().toISOString(),
-    settings: {
-      negative_prompt,
-      width,
-      height,
-      steps,
-      cfg_scale,
-      sampler,
-      loras,
-    },
-  };
-
-  galleryItems.unshift(item);
-  if (galleryItems.length > MAX_GALLERY) {
-    galleryItems.splice(MAX_GALLERY);
+  const running = Array.from(jobs.values()).filter((j) => j.status === "running");
+  if (running.length > 0) {
+    res.json({ job_id: running[0].id, status: "running", queued: true });
+    return;
   }
 
-  req.log.info({ id, generation_time_ms }, "Image generated");
+  const seed_used = seed != null ? seed : randomInt(2147483647);
+  const jobId = randomUUID();
 
-  res.json({
-    success: true,
-    image_base64: item.image_base64,
-    seed_used,
-    generation_time_ms,
-    model_name,
+  const job: GenerationJob = {
+    id: jobId,
+    status: "running",
+    created_at: new Date().toISOString(),
+  };
+  jobs.set(jobId, job);
+
+  req.log.info(
+    { jobId, model_name, prompt: prompt.slice(0, 80), width, height, steps, sampler, seed: seed_used },
+    "Starting async generation job",
+  );
+
+  runPlaceholderGeneration(jobId, {
     prompt,
-    id,
+    negative_prompt,
+    model_name,
+    width,
+    height,
+    steps,
+    cfg_scale,
+    seed_used,
+    sampler,
+    loras,
+  }).catch((err) => {
+    const j = jobs.get(jobId);
+    if (j) {
+      j.status = "failed";
+      j.error = String(err);
+      j.completed_at = new Date().toISOString();
+    }
+    logger.error({ jobId, err }, "Generation job failed");
   });
+
+  res.json({ job_id: jobId, status: "running" });
 });
 
-router.get("/gallery", async (_req, res): Promise<void> => {
+router.get("/jobs/:jobId", (req, res): void => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: `Job '${req.params.jobId}' not found` });
+    return;
+  }
+
+  const response: Record<string, unknown> = {
+    job_id: job.id,
+    status: job.status,
+    created_at: job.created_at,
+    completed_at: job.completed_at,
+  };
+
+  if (job.status === "completed" && job.result) {
+    Object.assign(response, job.result);
+  } else if (job.status === "failed") {
+    response.error = job.error;
+  }
+
+  res.json(response);
+});
+
+router.get("/gallery", (_req, res): void => {
   res.json({
     items: galleryItems,
     total: galleryItems.length,
   });
 });
 
-router.get("/samplers", async (_req, res): Promise<void> => {
+router.get("/samplers", (_req, res): void => {
   res.json({
     samplers: [
       { name: "DPM++ 2M Karras", label: "DPM++ 2M Karras" },
