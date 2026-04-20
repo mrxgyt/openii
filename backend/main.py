@@ -163,26 +163,41 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
 
         log.info("Loading pipeline from %s", model_path)
         gpu_available, _ = get_gpu_info()
-        dtype = torch.float16 if gpu_available else torch.float32
 
-        # Detect SDXL by name heuristic (can be improved with model config inspection)
-        is_sdxl = "xl" in model_name.lower() or "sdxl" in model_name.lower()
+        # Всегда используем float16 — вдвое меньше RAM/VRAM (float32 = OOM на CPU)
+        dtype = torch.float16
+
+        # Определяем тип модели по имени файла
+        name_lower = model_name.lower()
+        is_sdxl = any(kw in name_lower for kw in ("xl", "sdxl", "illustrious", "pony", "noob"))
         PipelineClass = StableDiffusionXLPipeline if is_sdxl else StableDiffusionPipeline
+
+        log.info("Pipeline class: %s, dtype: %s, gpu: %s", PipelineClass.__name__, dtype, gpu_available)
 
         pipe = PipelineClass.from_single_file(
             str(model_path),
             torch_dtype=dtype,
             use_safetensors=model_path.suffix == ".safetensors",
+            low_cpu_mem_usage=True,   # Снижает пиковое потребление RAM при загрузке
         )
 
         if gpu_available:
             pipe = pipe.to("cuda")
             try:
                 pipe.enable_xformers_memory_efficient_attention()
+                log.info("xformers memory efficient attention enabled")
             except Exception:
                 log.warning("xformers not available, using standard attention")
+            pipe.enable_attention_slicing()
         else:
             log.warning("No GPU detected, running on CPU (very slow)")
+            # CPU offload: держит части модели в RAM и загружает только нужные слои
+            try:
+                pipe.enable_sequential_cpu_offload()
+                log.info("Sequential CPU offload enabled")
+            except Exception as e:
+                log.warning("CPU offload not available: %s", e)
+                pipe.enable_attention_slicing(1)
 
         _pipeline_cache[model_name] = pipe
         _active_model = model_name

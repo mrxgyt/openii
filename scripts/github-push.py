@@ -21,6 +21,7 @@ API_BASE = "https://api.github.com"
 # Файлы для пуша (относительно корня проекта)
 FILES_TO_PUSH = [
     "Dockerfile",
+    "backend/main.py",
     "scripts/download-model.mjs",
     "scripts/entrypoint.sh",
     "scripts/start-backend.sh",
@@ -111,7 +112,7 @@ def main():
 
     # 5. Создать новый коммит
     commit_data = api_request(f"/repos/{OWNER}/{REPO}/git/commits", "POST", {
-        "message": "fix: перенёс скачивание модели на runtime (entrypoint.sh)\n\n- Dockerfile: скачивание модели перенесено из сборки образа в entrypoint\n- scripts/entrypoint.sh: скачивает модель через curl при первом старте контейнера\n- Это исправляет ошибку сборки на Northflank (node недоступен в CUDA образе)\n- Образ собирается быстро, модель скачивается при деплое",
+        "message": "fix: исправлен OOM краш при загрузке модели\n\n- backend/main.py: всегда используем float16 (было float32 на CPU = OOM)\n- Добавлен low_cpu_mem_usage=True для снижения пикового потребления RAM\n- Добавлен enable_sequential_cpu_offload() для CPU-режима\n- Добавлен enable_attention_slicing() для GPU/CPU\n- Улучшено определение SDXL/Illustrious моделей по имени файла",
         "tree": new_tree_sha,
         "parents": [head_sha],
     })
