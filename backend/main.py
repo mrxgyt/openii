@@ -295,9 +295,19 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
             pipe.enable_attention_slicing()
         else:
             log.warning("No GPU detected, running on CPU (very slow)")
-            # Чистый CPU режим — никаких CUDA вызовов
+            # Чистый CPU режим — максимальные оптимизации памяти
             pipe = pipe.to("cpu")
-            pipe.enable_attention_slicing(1)
+            pipe.enable_attention_slicing(1)   # Минимизирует RAM при attention
+            try:
+                pipe.enable_vae_slicing()       # VAE кодирует по частям — меньше пика RAM
+                log.info("VAE slicing enabled")
+            except Exception:
+                pass
+            try:
+                pipe.enable_vae_tiling()        # VAE тайлинг для больших изображений
+                log.info("VAE tiling enabled")
+            except Exception:
+                pass
 
         _pipeline_cache[model_name] = pipe
         _active_model = model_name
@@ -362,8 +372,15 @@ def run_inference(request: GenerateRequest) -> tuple[bytes, int]:
         request.model_name, request.steps, request.width, request.height, seed_used,
     )
 
-    result = pipe(**kwargs)
+    # Освободить RAM перед генерацией
+    gc.collect()
+
+    with torch.no_grad():
+        result = pipe(**kwargs)
     image = result.images[0]
+
+    # Освободить промежуточные тензоры
+    gc.collect()
 
     buf = io.BytesIO()
     image.save(buf, format="PNG")
