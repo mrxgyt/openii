@@ -318,25 +318,46 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
         )
 
         if gpu_available:
-            pipe = pipe.to("cuda")
+            if is_sdxl:
+                # SDXL требует ~10-12 GB VRAM — используем CPU offload чтобы избежать OOM.
+                # enable_model_cpu_offload() держит в VRAM только активный слой,
+                # поэтому НЕ нужно вызывать pipe.to("cuda") — offload делает это сам.
+                pipe.enable_model_cpu_offload()
+                log.info("SDXL: model_cpu_offload enabled (экономит VRAM)")
+            else:
+                pipe = pipe.to("cuda")
+                log.info("SD1.5: loaded to CUDA")
+
             try:
                 pipe.enable_xformers_memory_efficient_attention()
                 log.info("xformers memory efficient attention enabled")
             except Exception:
                 log.warning("xformers not available, using standard attention")
+
             pipe.enable_attention_slicing()
-        else:
-            log.warning("No GPU detected, running on CPU (very slow)")
-            # Чистый CPU режим — максимальные оптимизации памяти
-            pipe = pipe.to("cpu")
-            pipe.enable_attention_slicing(1)   # Минимизирует RAM при attention
+
             try:
-                pipe.enable_vae_slicing()       # VAE кодирует по частям — меньше пика RAM
+                pipe.enable_vae_slicing()
                 log.info("VAE slicing enabled")
             except Exception:
                 pass
             try:
-                pipe.enable_vae_tiling()        # VAE тайлинг для больших изображений
+                pipe.enable_vae_tiling()
+                log.info("VAE tiling enabled")
+            except Exception:
+                pass
+        else:
+            log.warning("No GPU detected, running on CPU (very slow)")
+            # Чистый CPU режим — максимальные оптимизации памяти
+            pipe = pipe.to("cpu")
+            pipe.enable_attention_slicing(1)
+            try:
+                pipe.enable_vae_slicing()
+                log.info("VAE slicing enabled")
+            except Exception:
+                pass
+            try:
+                pipe.enable_vae_tiling()
                 log.info("VAE tiling enabled")
             except Exception:
                 pass
@@ -373,7 +394,12 @@ def apply_loras(pipe: Any, loras: list[LoraConfig], loras_dir: Path) -> None:
         log.info("Loading LoRA %s with weight %s", lora.name, lora.weight)
         try:
             pipe.load_lora_weights(str(lora_path))
-            pipe.fuse_lora(lora_scale=lora.weight)
+            try:
+                # fuse_lora требует PEFT — пробуем, если не получается — просто оставляем unfused
+                pipe.fuse_lora(lora_scale=lora.weight)
+                log.info("LoRA %s fused (PEFT available)", lora.name)
+            except Exception as fuse_err:
+                log.warning("LoRA %s loaded but not fused (PEFT недоступен): %s", lora.name, fuse_err)
         except Exception as e:
             log.warning("Could not apply LoRA %s: %s", lora.name, e)
 

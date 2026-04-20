@@ -22,6 +22,7 @@ API_BASE = "https://api.github.com"
 FILES_TO_PUSH = [
     "Dockerfile",
     "backend/main.py",
+    "backend/requirements.txt",
     "scripts/download-model.mjs",
     "scripts/entrypoint.sh",
     "scripts/start-backend.sh",
@@ -116,7 +117,7 @@ def main():
 
     # 5. Создать новый коммит
     commit_data = api_request(f"/repos/{OWNER}/{REPO}/git/commits", "POST", {
-        "message": "fix: исправлено определение типа модели (SD1.5 vs SDXL)\n\n- backend/main.py: добавлена функция detect_model_type() — читает заголовок safetensors\n- Исправлен TypeError: argument of type 'NoneType' is not iterable\n- Модель с именем 'default-model' теперь корректно определяется как SDXL/Illustrious\n  по содержимому файла (ключ 'conditioner.' в заголовке safetensors)\n- Ранее код проверял только имя файла, игнорируя реальную архитектуру модели",
+        "message": "fix: OOM при SDXL + LoRA PEFT + определение типа модели\n\n- backend/main.py: SDXL теперь использует enable_model_cpu_offload() вместо .to('cuda')\n  → VRAM usage: ~12GB → ~5-6GB, устраняет OOM-краш сервера\n- backend/main.py: добавлен VAE slicing/tiling для GPU режима\n- backend/main.py: LoRA — fuse_lora() теперь graceful fallback если PEFT недоступен\n- backend/main.py: detect_model_type() по заголовку safetensors (исправлен TypeError)\n- backend/requirements.txt: добавлен peft==0.14.0 для корректной работы LoRA",
         "tree": new_tree_sha,
         "parents": [head_sha],
     })

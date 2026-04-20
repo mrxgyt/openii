@@ -11,3 +11,4 @@ Pillow==11.0.0
 safetensors==0.4.5
 pydantic==2.10.3
 aiofiles==24.1.0
+peft==0.14.0
