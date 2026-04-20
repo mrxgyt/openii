@@ -268,8 +268,8 @@ def load_pipeline(model_name: str, sampler: str = "DPM++ 2M Karras") -> Any:
         log.info("Loading pipeline from %s", model_path)
         gpu_available, _ = get_gpu_info()
 
-        # Всегда используем float16 — вдвое меньше RAM/VRAM (float32 = OOM на CPU)
-        dtype = torch.float16
+        # float16 только на GPU — CPU не поддерживает float16 в PyTorch
+        dtype = torch.float16 if gpu_available else torch.float32
 
         # Определяем тип модели по имени файла
         name_lower = model_name.lower()
